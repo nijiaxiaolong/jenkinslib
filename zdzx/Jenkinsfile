@@ -1,0 +1,68 @@
+pipeline {
+    agent any
+    parameters {
+        choice choices: ['chinaoly', 'chinaoly,cdh5.16.2-es5.6.14','chinaoly,cdh5.16.2-es6.8.2','chinaoly,huawei6.5.1-es6.7.1','chinaoly,huawei8.1.0.1-es7.10.2'],name: 'PROFILE_ID'
+        choice choices: ['devops', 'test'], description: 'k8s集群分组', name: 'K8S_NAMESPACE'
+        //gitParameter branchFilter: 'origin/(.*)', defaultValue: 'dev', selectedValue: 'NONE', name: 'BRANCH', type: 'GitParameterDefinition'
+    }
+    environment {
+        a = "b"
+    }
+    stages {
+        stage('拉取代码') {
+            steps {
+                //git branch: "${params.BRANCH}",credentialsId:'4c330206-6e3c-452a-a30d-db77381ff13b',url: 'http://192.168.1.244/YFZB/QZXYTH-ZDZX-Service.git'
+                checkout scm
+            }
+        }
+        stage('maven构建') {
+            steps {
+                sh "mvn -U -DskipTests clean package -P ${params.PROFILE_ID}"
+            }
+        }
+        stage('发布镜像') {
+            steps {
+                dir('zdzx-web') {
+                    sh " mvn dockerfile:build dockerfile:push -P ${params.PROFILE_ID}"
+                }
+            }
+        }
+
+        stage('部署到k8s集群') {
+            steps {
+                dir('zdzx-web') {
+                    script {
+                        pom = readMavenPom file: 'pom.xml'
+                    }
+                    sh "sudo sed -i 's#{TAG}#${pom.version}#g;s#{APP_NAME}#${pom.name}#g;s#{NAMESPACE}#${params.K8S_NAMESPACE}#g' k8s-deployment.yml"
+                    sh 'sudo kubectl apply -f k8s-deployment.yml'
+                }
+            }
+        }
+    }
+
+    post {
+            always {
+                script {
+                    println('总是执行的脚本片段')
+                }
+            }
+
+            success {
+                script {
+                    currentBuild.description = '\n 构建成功'
+                }
+            }
+
+            failure {
+                script {
+                    currentBuild.description = '\n 构建失败'
+                }
+            }
+
+            aborted {
+                script {
+                    currentBuild.description = '\n 构建取消'
+                }
+            }
+}
